@@ -74,3 +74,33 @@ class REINFORCEAgent:
             # Clear memory
             self.log_probs = []
             self.rewards = []
+            
+    def update2(self, gamma=0.99, b=20): # b=20 baseline
+        discounted_rewards = []
+        G = 0
+        
+        # Calculate discounted rewards in reverse order (from the end of the episode to the beginning)
+        for r in reversed(self.rewards):
+            G = r + gamma * G
+            discounted_rewards.insert(0, G)
+            
+        discounted_rewards = torch.FloatTensor(discounted_rewards)
+        
+        # Note: We are not normalizing the rewards here because we are using a baseline (b=20) to reduce variance, and the advantage calculation will already help with stability. Normalizing after subtracting the baseline could potentially distort the advantage estimates, so we will skip normalization in this case.
+        
+        policy_loss = []
+        for log_prob, Gt in zip(self.log_probs, discounted_rewards):
+            # Calculating (G_t - b)
+            advantage = Gt - b 
+            policy_loss.append(-log_prob * advantage)
+            
+        # Gradient update
+        self.optimizer.zero_grad()
+        policy_loss = torch.stack(policy_loss).sum()
+        policy_loss.backward()
+        self.optimizer.step()
+        
+        # Clear memory
+        self.log_probs = []
+        self.rewards = []
+            
