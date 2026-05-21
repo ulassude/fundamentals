@@ -23,6 +23,6 @@ for episode in range(2000): # 2000 episodes for training
     agent.update()
     
     if episode % 10 == 0:
-        print(f"Episode {episode} - Toplam Ödül: {ep_reward:.2f}")
+        print(f"Episode {episode} - Total Reward: {ep_reward:.2f}")
 
 torch.save(agent.policy.state_dict(), "hopper_reinforce_model.pth")
