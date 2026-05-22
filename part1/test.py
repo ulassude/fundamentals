@@ -1,33 +1,24 @@
 import gymnasium as gym
 import torch
-import time
-from agent import REINFORCEAgent
+import numpy as np
+from agent import Policy #
 
-# 1. Open the environment with rendering enabled to visualize the agent's performance
-env = gym.make("Hopper-v4", render_mode="human")
+env = gym.make('Hopper-v4', render_mode='human')
+policy = Policy(state_space=11, action_space=3)
 
-# 2. Create an agent and load the trained model
-agent = REINFORCEAgent()
-agent.policy.load_state_dict(torch.load("hopper_reinforce_model.pth"))
-agent.policy.eval() # Modeli test (evaluation) moduna alıyoruz
+policy.load_state_dict(torch.load("hopper_reinforce_model.pth"))
+#policy.load_state_dict(torch.load("hopper_reinforce_baseline_model.pth"))
+#policy.load_state_dict(torch.load("hopper_actor_critic_model.pth"))
 
-# 3. Watch the agent perform in the environment
+policy.eval()
+
 state, info = env.reset()
 done = False
 
 while not done:
-    # We force the agent to select the mean action (deterministic) for visualization purposes
-    with torch.no_grad():
-        state_tensor = torch.FloatTensor(state)
-        mean, _ = agent.policy(state_tensor)
-        action = mean.squeeze(0).numpy()
-        
-    next_state, reward, terminated, truncated, info = env.step(action)
-    state = next_state
+    state_clean = np.array(state, dtype=np.float32)
+    normal_dist = policy(torch.from_numpy(state_clean))
+    action = normal_dist.mean.detach().numpy()
     
-    # Sleep between steps to slow down the rendering (optional, adjust as needed)
-    time.sleep(0.02) 
-    
+    state, reward, terminated, truncated, _ = env.step(action)
     done = terminated or truncated
-
-env.close()
