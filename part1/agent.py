@@ -31,12 +31,13 @@ class Policy(torch.nn.Module):
         # Learned standard deviation for exploration at training time 
         self.sigma_activation = F.softplus
         init_sigma = 0.5
-        self.sigma = torch.nn.Parameter(torch.zeros(self.action_space) + init_sigma)
+        self.sigma = torch.nn.Parameter(torch.zeros(self.action_space)+init_sigma)
 
         """
             Critic network
         """
         # TASK 3: critic network for actor-critic algorithm
+        # Critic maps state_space to a single scalar state-value V(s)
         self.fc1_critic = torch.nn.Linear(state_space, self.hidden)
         self.fc2_critic = torch.nn.Linear(self.hidden, self.hidden)
         self.fc3_critic_value = torch.nn.Linear(self.hidden, 1)
@@ -46,6 +47,7 @@ class Policy(torch.nn.Module):
     def init_weights(self):
         for m in self.modules():
             if type(m) is torch.nn.Linear:
+                # Normal initialization with small std to prevent early saturation
                 torch.nn.init.normal_(m.weight)
                 torch.nn.init.zeros_(m.bias)
 
@@ -64,17 +66,20 @@ class Policy(torch.nn.Module):
             Critic
         """
         # TASK 3: forward in the critic network
+        # Forward pass through the critic network to estimate V(s)
         x_critic = self.tanh(self.fc1_critic(x))
         x_critic = self.tanh(self.fc2_critic(x_critic))
         state_value = self.fc3_critic_value(x_critic)
         
-        return normal_dist
+        # Return both the action distribution and estimated state value
+        return normal_dist, state_value
 
 
 class Agent(object):
     def __init__(self, policy, device='cpu'):
         self.train_device = device
         self.policy = policy.to(self.train_device)
+        # Using a stable learning rate of 3e-4 to avoid policy collapse
         self.optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
 
         self.gamma = 0.99
@@ -91,51 +96,58 @@ class Agent(object):
         rewards = torch.stack(self.rewards, dim=0).to(self.train_device).squeeze(-1)
         done = torch.Tensor(self.done).to(self.train_device)
 
-        # Clear memory after stacking
         self.states, self.next_states, self.action_log_probs, self.rewards, self.done = [], [], [], [], []
 
+        #
+        # TASK 2: REINFORCE with Constant Baseline
+        #   - compute discounted returns
+        #   - compute policy gradient loss function given actions and returns
+        #   - compute gradients and step the optimizer
+        #
         if algorithm == "REINFORCE_BASELINE":
-            #
-            # TASK 2: REINFORCE with Stable Baseline = 20
-            #
-            # 1. Compute discounted returns
+            # 1. Compute discounted returns G_t using the helper function
             returns = discount_rewards(rewards, self.gamma)
             
-            # 2. Advantage terimini hesapla (G_t - b)
+            # 2. Calculate the advantage using the stable constant baseline (b)
             advantages = returns - b
             
-            # 3. compute policy gradient loss function given actions and returns
+            # 3. Compute policy gradient loss (negative for gradient ascent)
             policy_loss = -(action_log_probs * advantages).sum()
             
-            # 4. Compute gradients and step the optimizer
+            # 4. Backpropagation and optimization step
             self.optimizer.zero_grad()
             policy_loss.backward()
             self.optimizer.step()
 
+        #
+        # TASK 3: Actor-Critic Algorithm
+        #   - compute boostrapped discounted return estimates
+        #   - compute advantage terms
+        #   - compute actor loss and critic loss
+        #   - compute gradients and step the optimizer
+        #
         elif algorithm == "ACTOR_CRITIC":
-            #
-            # TASK 3: Actor-Critic
-            #
-            # 1. Compute boostrapped discounted return estimates
+            # 1. Get current state value estimates V(s) from critic
             _, state_values = self.policy(states)
             state_values = state_values.squeeze(-1)
             
+            # 2. Compute bootstrapped TD targets: r + gamma * V(s') * (1 - done)
             with torch.no_grad():
                 _, next_state_values = self.policy(next_states)
                 next_state_values = next_state_values.squeeze(-1)
-                # If done is True, we don't add the next state value to the target
                 target_values = rewards + self.gamma * next_state_values * (1 - done)
             
-            # 2. Compute advantage terms
+            # 3. Compute TD Advantage: Target - V(s)
             advantages = target_values - state_values
             
-            # 3. Compute actor loss and critic loss
+            # 4. Calculate Actor loss (Policy Gradient) and Critic loss (MSE)
             actor_loss = -(action_log_probs * advantages.detach()).sum()
             critic_loss = F.mse_loss(state_values, target_values, reduction='sum')
             
+            # Total multi-task loss with standard Critic weight scaling (0.5)
             total_loss = actor_loss + 0.5 * critic_loss
             
-            # 4. Compute gradients and step the optimizer
+            # 5. Joint optimization step
             self.optimizer.zero_grad()
             total_loss.backward()
             self.optimizer.step()
@@ -146,7 +158,8 @@ class Agent(object):
         """ state -> action (3-d), action_log_densities """
         x = torch.from_numpy(state).float().to(self.train_device)
 
-        normal_dist = self.policy(x)
+        # Unpack the tuple since policy forward now returns (normal_dist, state_value)
+        normal_dist, _ = self.policy(x)
 
         if evaluation:  # Return mean
             return normal_dist.mean, None
@@ -154,7 +167,7 @@ class Agent(object):
         else:   # Sample from the distribution
             action = normal_dist.sample()
 
-            # Compute Log probability of the action [ log(p(a[0] AND a[1] AND a[2])) = log(p(a[0])*p(a[1])*p(a[2])) = log(p(a[0])) + log(p(a[1])) + log(p(a[2])) ]
+            # Compute Log probability of the action
             action_log_prob = normal_dist.log_prob(action).sum()
 
             return action, action_log_prob
